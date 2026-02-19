@@ -233,4 +233,8 @@ echo ""
 echo -e "  🔔 Recibirás notificación cuando terminen."
 echo ""
 
+# Agregar alias stems-limpiar al zshrc
+grep -q "stems-limpiar" "$HOME/.zshrc" 2>/dev/null || echo 'alias stems-limpiar="> $HOME/Music/.stems_procesados && echo Registro limpiado. Las canciones en Pre Editar se reprocesarán."' >> "$HOME/.zshrc"
+source "$HOME/.zshrc" 2>/dev/null
+
 open "$PRE_EDITAR_DIR"
