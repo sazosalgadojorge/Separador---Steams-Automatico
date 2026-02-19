@@ -160,12 +160,18 @@ cat > "$WATCHER_PATH" << WATCHEOF
 #!/bin/bash
 export PATH="\$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:\$PATH"
 WATCH_DIR="\$HOME/Music/Pre Editar"
+PROYECTOS_DIR="\$HOME/Music/Editar"
+PROCESSED="\$HOME/Music/.stems_procesados"
+touch "\$PROCESSED"
+
 while true; do
     find "\$WATCH_DIR" -maxdepth 1 \( -name "*.mp3" -o -name "*.wav" -o -name "*.flac" -o -name "*.m4a" -o -name "*.aiff" \) | while read -r FILE; do
-        NOMBRE=$(basename "\$FILE")
-        NOMBRE_LIMPIO="${NOMBRE%.*}"
-        STEMS_DIR="\$HOME/Music/Editar/\$NOMBRE_LIMPIO/Stems"
-        if [ ! -d "\$STEMS_DIR" ] || [ -z "$(ls -A \"\$STEMS_DIR\" 2>/dev/null)" ]; then
+        NOMBRE=\$(basename "\$FILE")
+        NOMBRE_LIMPIO="\${NOMBRE%.*}"
+        STEMS_DIR="\$PROYECTOS_DIR/\$NOMBRE_LIMPIO/Stems"
+        STEM_COUNT=\$(find "\$STEMS_DIR" -name "*.wav" 2>/dev/null | wc -l | tr -d ' ')
+        if ! grep -qF "\$FILE" "\$PROCESSED" && [ "\$STEM_COUNT" -lt 4 ]; then
+            echo "\$FILE" >> "\$PROCESSED"
             bash "\$HOME/Music/separar_stems.sh" "\$FILE" &
         fi
     done
