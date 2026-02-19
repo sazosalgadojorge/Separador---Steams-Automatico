@@ -2,22 +2,21 @@
 
 # ============================================================
 #  INSTALADOR AUTOMÁTICO — Separador de Stems
-#  Corre este script y hace todo solo.
+#  Compatible con cualquier Mac con macOS 12+
 # ============================================================
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-RED='\033[0;31m'
+RED='\033[0;31d'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-USUARIO=$(whoami)
 MUSIC_DIR="$HOME/Music"
-SCRIPT_PATH="$MUSIC_DIR/separar_stems.sh"
 PROYECTOS_DIR="$HOME/Music/Editar"
 PRE_EDITAR_DIR="$HOME/Music/Pre Editar"
-AUTOMATOR_PATH="$HOME/Library/Application Support/Automator"
-WORKFLOW_PATH="$HOME/Library/Workflows/Applications/Folder Actions/Stems Auto.workflow"
+SCRIPT_PATH="$MUSIC_DIR/separar_stems.sh"
+WATCHER_PATH="$MUSIC_DIR/watcher_stems.sh"
+PLIST_PATH="$HOME/Library/LaunchAgents/com.stemsauto.watcher.plist"
 
 echo ""
 echo -e "${BLUE}╔════════════════════════════════════════╗${NC}"
@@ -26,296 +25,191 @@ echo -e "${BLUE}╚════════════════════�
 echo ""
 
 # ── PASO 1: Homebrew ──
-echo -e "${YELLOW}[1/6] Verificando Homebrew...${NC}"
+echo -e "${YELLOW}[1/7] Verificando Homebrew...${NC}"
 if ! command -v brew &> /dev/null; then
-    echo "  Instalando Homebrew (puede tardar unos minutos)..."
+    echo "  Instalando Homebrew..."
     /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-    # Agregar brew al PATH para Apple Silicon
-    if [ -f "/opt/homebrew/bin/brew" ]; then
-        eval "$(/opt/homebrew/bin/brew shellenv)"
-        echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> "$HOME/.zprofile"
-    fi
-else
-    echo -e "  ${GREEN}✓ Homebrew ya está instalado${NC}"
 fi
+if [ -f "/opt/homebrew/bin/brew" ]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+    echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> "$HOME/.zprofile"
+elif [ -f "/usr/local/bin/brew" ]; then
+    eval "$(/usr/local/bin/brew shellenv)"
+fi
+echo -e "  ${GREEN}✓ Homebrew listo${NC}"
 
 # ── PASO 2: Python 3.11 ──
-echo -e "${YELLOW}[2/6] Verificando Python 3.11...${NC}"
-if ! /opt/homebrew/bin/python3.11 --version &> /dev/null; then
+echo -e "${YELLOW}[2/7] Verificando Python 3.11...${NC}"
+PYTHON311=""
+for p in "/opt/homebrew/bin/python3.11" "/usr/local/bin/python3.11"; do
+    if [ -f "$p" ]; then PYTHON311="$p"; break; fi
+done
+if [ -z "$PYTHON311" ]; then
     echo "  Instalando Python 3.11..."
     brew install python@3.11
-else
-    echo -e "  ${GREEN}✓ Python 3.11 ya está instalado${NC}"
+    for p in "/opt/homebrew/bin/python3.11" "/usr/local/bin/python3.11"; do
+        if [ -f "$p" ]; then PYTHON311="$p"; break; fi
+    done
 fi
+echo -e "  ${GREEN}✓ Python 3.11: $PYTHON311${NC}"
 
-# ── PASO 3: pipx y Demucs ──
-echo -e "${YELLOW}[3/6] Instalando Demucs...${NC}"
+# ── PASO 3: pipx ──
+echo -e "${YELLOW}[3/7] Verificando pipx...${NC}"
 if ! command -v pipx &> /dev/null; then
     brew install pipx
-    pipx ensurepath
-    export PATH="$HOME/.local/bin:$PATH"
 fi
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+echo -e "  ${GREEN}✓ pipx listo${NC}"
 
-if ! command -v demucs &> /dev/null && ! [ -f "$HOME/.local/bin/demucs" ]; then
-    pipx install demucs --python /opt/homebrew/bin/python3.11
-    pipx inject demucs soundfile
-    echo -e "  ${GREEN}✓ Demucs instalado${NC}"
-else
-    echo -e "  ${GREEN}✓ Demucs ya está instalado${NC}"
-fi
-
-# Asegurar PATH
-export PATH="$HOME/.local/bin:$PATH"
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.zshrc"
-
-# ── PASO 4: Carpetas ──
-echo -e "${YELLOW}[4/6] Creando carpetas...${NC}"
-mkdir -p "$PROYECTOS_DIR"
-mkdir -p "$PRE_EDITAR_DIR"
-echo -e "  ${GREEN}✓ Carpetas creadas${NC}"
-echo "     → Pre Editar: $PRE_EDITAR_DIR"
-echo "     → Editar:     $PROYECTOS_DIR"
-
-# ── PASO 5: Script principal ──
-echo -e "${YELLOW}[5/6] Instalando script principal...${NC}"
-cat > "$SCRIPT_PATH" << 'SCRIPTEOF'
-#!/bin/bash
-
-# Buscar demucs en todas las rutas posibles
+# ── PASO 4: Demucs ──
+echo -e "${YELLOW}[4/7] Instalando Demucs...${NC}"
 DEMUCS_BIN=""
-for ruta in "$HOME/.local/bin/demucs" "/opt/homebrew/bin/demucs" "/usr/local/bin/demucs"; do
-    if [ -f "$ruta" ]; then
-        DEMUCS_BIN="$ruta"
-        break
-    fi
+for d in "$HOME/.local/bin/demucs" "/opt/homebrew/bin/demucs" "/usr/local/bin/demucs" "$HOME/.local/pipx/venvs/demucs/bin/demucs"; do
+    if [ -f "$d" ]; then DEMUCS_BIN="$d"; break; fi
 done
 
 if [ -z "$DEMUCS_BIN" ]; then
+    pipx install demucs --python "$PYTHON311"
+    pipx inject demucs soundfile
+    for d in "$HOME/.local/bin/demucs" "/opt/homebrew/bin/demucs" "/usr/local/bin/demucs" "$HOME/.local/pipx/venvs/demucs/bin/demucs"; do
+        if [ -f "$d" ]; then DEMUCS_BIN="$d"; break; fi
+    done
+fi
+echo -e "  ${GREEN}✓ Demucs: $DEMUCS_BIN${NC}"
+
+# ── PASO 5: Carpetas ──
+echo -e "${YELLOW}[5/7] Creando carpetas...${NC}"
+mkdir -p "$PROYECTOS_DIR"
+mkdir -p "$PRE_EDITAR_DIR"
+echo -e "  ${GREEN}✓ Carpetas creadas${NC}"
+
+# ── PASO 6: Script principal ──
+echo -e "${YELLOW}[6/7] Instalando script principal...${NC}"
+cat > "$SCRIPT_PATH" << SCRIPTEOF
+#!/bin/bash
+
+DEMUCS_BIN=""
+for d in "\$HOME/.local/bin/demucs" "/opt/homebrew/bin/demucs" "/usr/local/bin/demucs" "\$HOME/.local/pipx/venvs/demucs/bin/demucs"; do
+    if [ -f "\$d" ]; then DEMUCS_BIN="\$d"; break; fi
+done
+
+if [ -z "\$DEMUCS_BIN" ]; then
     osascript -e "display notification \"❌ Demucs no encontrado. Reinstala.\" with title \"Separador de Stems\" sound name \"Basso\""
     exit 1
 fi
 
-PROYECTOS_DIR="$HOME/Music/Editar"
+PROYECTOS_DIR="\$HOME/Music/Editar"
+ARCHIVO="\$1"
 
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-RED='\033[0;31m'
-NC='\033[0m'
+if [ -z "\$ARCHIVO" ] || [ ! -f "\$ARCHIVO" ]; then exit 1; fi
 
-if [ -z "$1" ]; then
-    exit 1
-fi
-
-ARCHIVO="$1"
-if [ ! -f "$ARCHIVO" ]; then
-    exit 1
-fi
-
-# Solo procesar archivos de audio
-EXT="${ARCHIVO##*.}"
-EXT=$(echo "$EXT" | tr '[:upper:]' '[:lower:]')
-if [[ "$EXT" != "mp3" && "$EXT" != "wav" && "$EXT" != "flac" && "$EXT" != "m4a" && "$EXT" != "aiff" ]]; then
+EXT="\${ARCHIVO##*.}"
+EXT=\$(echo "\$EXT" | tr '[:upper:]' '[:lower:]')
+if [[ "\$EXT" != "mp3" && "\$EXT" != "wav" && "\$EXT" != "flac" && "\$EXT" != "m4a" && "\$EXT" != "aiff" ]]; then
     exit 0
 fi
 
-NOMBRE=$(basename "$ARCHIVO")
-NOMBRE_LIMPIO="${NOMBRE%.*}"
+NOMBRE=\$(basename "\$ARCHIVO")
+NOMBRE_LIMPIO="\${NOMBRE%.*}"
+CARPETA_PROYECTO="\$PROYECTOS_DIR/\$NOMBRE_LIMPIO"
+CARPETA_STEMS="\$CARPETA_PROYECTO/Stems"
+CARPETA_AUDIO="\$CARPETA_PROYECTO/Audio"
+CARPETA_ABLETON="\$CARPETA_PROYECTO/Ableton"
 
-CARPETA_PROYECTO="$PROYECTOS_DIR/$NOMBRE_LIMPIO"
-CARPETA_STEMS="$CARPETA_PROYECTO/Stems"
-CARPETA_AUDIO="$CARPETA_PROYECTO/Audio"
-CARPETA_ABLETON="$CARPETA_PROYECTO/Ableton"
+mkdir -p "\$CARPETA_STEMS" "\$CARPETA_AUDIO" "\$CARPETA_ABLETON"
+cp "\$ARCHIVO" "\$CARPETA_AUDIO/"
 
-mkdir -p "$CARPETA_STEMS" "$CARPETA_AUDIO" "$CARPETA_ABLETON"
-cp "$ARCHIVO" "$CARPETA_AUDIO/"
+osascript -e "display notification \"⏳ Separando stems: \$NOMBRE_LIMPIO\" with title \"Separador de Stems\""
 
-osascript -e "display notification \"⏳ Procesando: $NOMBRE_LIMPIO\" with title \"Separador de Stems\""
+"\$DEMUCS_BIN" -n htdemucs --out "\$CARPETA_STEMS" "\$ARCHIVO"
 
-"$DEMUCS_BIN" -n htdemucs --out "$CARPETA_STEMS" "$ARCHIVO"
-
-if [ $? -ne 0 ]; then
-    osascript -e "display notification \"❌ Error al procesar: $NOMBRE_LIMPIO\" with title \"Separador de Stems\" sound name \"Basso\""
+if [ \$? -ne 0 ]; then
+    osascript -e "display notification \"❌ Error: \$NOMBRE_LIMPIO\" with title \"Separador de Stems\" sound name \"Basso\""
     exit 1
 fi
 
-STEMS_GENERADOS="$CARPETA_STEMS/htdemucs/$NOMBRE_LIMPIO"
-if [ -d "$STEMS_GENERADOS" ]; then
-    mv "$STEMS_GENERADOS"/*.wav "$CARPETA_STEMS/"
-    rm -rf "$CARPETA_STEMS/htdemucs"
+STEMS_GENERADOS="\$CARPETA_STEMS/htdemucs/\$NOMBRE_LIMPIO"
+if [ -d "\$STEMS_GENERADOS" ]; then
+    mv "\$STEMS_GENERADOS"/*.wav "\$CARPETA_STEMS/"
+    rm -rf "\$CARPETA_STEMS/htdemucs"
 fi
 
-for STEM in "$CARPETA_STEMS"/*.wav; do
-    STEM_NOMBRE=$(basename "$STEM")
-    mv "$STEM" "$CARPETA_STEMS/${NOMBRE_LIMPIO}_${STEM_NOMBRE}"
+for STEM in "\$CARPETA_STEMS"/*.wav; do
+    STEM_NOMBRE=\$(basename "\$STEM")
+    mv "\$STEM" "\$CARPETA_STEMS/\${NOMBRE_LIMPIO}_\${STEM_NOMBRE}"
 done
 
-osascript -e "display notification \"✅ Stems listos: $NOMBRE_LIMPIO\" with title \"Separador de Stems\" sound name \"Glass\""
+osascript -e "display notification \"✅ Stems listos: \$NOMBRE_LIMPIO\" with title \"Separador de Stems\" sound name \"Glass\""
 SCRIPTEOF
 
 chmod +x "$SCRIPT_PATH"
-echo -e "  ${GREEN}✓ Script instalado en $SCRIPT_PATH${NC}"
+echo -e "  ${GREEN}✓ Script principal listo${NC}"
 
-# ── PASO 6: Workflow de Automator ──
-echo -e "${YELLOW}[6/6] Creando workflow de Automator...${NC}"
-mkdir -p "$WORKFLOW_PATH/Contents"
+# ── PASO 7: Watcher con launchd ──
+echo -e "${YELLOW}[7/7] Configurando vigilante de carpeta...${NC}"
 
-cat > "$WORKFLOW_PATH/Contents/document.wflow" << WFLOWEOF
+cat > "$WATCHER_PATH" << WATCHEOF
+#!/bin/bash
+export PATH="\$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:\$PATH"
+WATCH_DIR="\$HOME/Music/Pre Editar"
+PROCESSED="\$HOME/Music/.stems_procesados"
+touch "\$PROCESSED"
+
+while true; do
+    find "\$WATCH_DIR" -maxdepth 1 \( -name "*.mp3" -o -name "*.wav" -o -name "*.flac" -o -name "*.m4a" -o -name "*.aiff" \) | while read -r FILE; do
+        if ! grep -qF "\$FILE" "\$PROCESSED"; then
+            echo "\$FILE" >> "\$PROCESSED"
+            bash "\$HOME/Music/separar_stems.sh" "\$FILE" &
+        fi
+    done
+    sleep 5
+done
+WATCHEOF
+
+chmod +x "$WATCHER_PATH"
+
+# Detener watcher anterior si existe
+launchctl unload "$PLIST_PATH" 2>/dev/null
+
+cat > "$PLIST_PATH" << PLISTEOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>AMApplicationBuild</key>
-    <string>521.1</string>
-    <key>AMApplicationVersion</key>
-    <string>2.10</string>
-    <key>AMDocumentVersion</key>
-    <string>2</string>
-    <key>actions</key>
+    <key>Label</key>
+    <string>com.stemsauto.watcher</string>
+    <key>ProgramArguments</key>
     <array>
-        <dict>
-            <key>action</key>
-            <dict>
-                <key>AMAccepts</key>
-                <dict>
-                    <key>Container</key>
-                    <string>List</string>
-                    <key>Optional</key>
-                    <true/>
-                    <key>Types</key>
-                    <array>
-                        <string>com.apple.cocoa.path</string>
-                    </array>
-                </dict>
-                <key>AMActionVersion</key>
-                <string>2.0.3</string>
-                <key>AMApplication</key>
-                <array>
-                    <string>Automator</string>
-                </array>
-                <key>AMParameterProperties</key>
-                <dict>
-                    <key>COMMAND_STRING</key>
-                    <dict/>
-                    <key>CheckedForUserDefaultShell</key>
-                    <dict/>
-                    <key>inputMethod</key>
-                    <dict/>
-                    <key>shell</key>
-                    <dict/>
-                    <key>source</key>
-                    <dict/>
-                </dict>
-                <key>AMProvides</key>
-                <dict>
-                    <key>Container</key>
-                    <string>List</string>
-                    <key>Types</key>
-                    <array>
-                        <string>com.apple.cocoa.path</string>
-                    </array>
-                </dict>
-                <key>ActionBundlePath</key>
-                <string>/System/Library/Automator/Run Shell Script.action</string>
-                <key>ActionName</key>
-                <string>Run Shell Script</string>
-                <key>ActionParameters</key>
-                <dict>
-                    <key>COMMAND_STRING</key>
-                    <string>for f in "$@"
-do
-    bash "$HOME/Music/separar_stems.sh" "$f"
-done</string>
-                    <key>CheckedForUserDefaultShell</key>
-                    <true/>
-                    <key>inputMethod</key>
-                    <integer>1</integer>
-                    <key>shell</key>
-                    <string>/bin/zsh</string>
-                    <key>source</key>
-                    <string></string>
-                </dict>
-                <key>BundleIdentifier</key>
-                <string>com.apple.RunShellScript</string>
-                <key>CFBundleVersion</key>
-                <string>2.0.3</string>
-                <key>CanShowSelectedItemsWhenRun</key>
-                <false/>
-                <key>CanShowWhenRun</key>
-                <true/>
-                <key>Category</key>
-                <array>
-                    <string>AMCategoryUtilities</string>
-                </array>
-                <key>Class Name</key>
-                <string>RunShellScriptAction</string>
-                <key>InputUUID</key>
-                <string>6A3B2C1D-4E5F-6A7B-8C9D-0E1F2A3B4C5D</string>
-                <key>Keywords</key>
-                <array>
-                    <string>Shell</string>
-                    <string>Script</string>
-                    <string>Command</string>
-                    <string>Run</string>
-                    <string>Unix</string>
-                </array>
-                <key>OutputUUID</key>
-                <string>1A2B3C4D-5E6F-7A8B-9C0D-1E2F3A4B5C6D</string>
-                <key>UUID</key>
-                <string>9F8E7D6C-5B4A-3928-1706-F5E4D3C2B1A0</string>
-                <key>UnlocalizedApplications</key>
-                <array>
-                    <string>Automator</string>
-                </array>
-                <key>arguments</key>
-                <dict/>
-                <key>isViewVisible</key>
-                <true/>
-                <key>location</key>
-                <string>309.000000:388.000000</string>
-                <key>nibPath</key>
-                <string>/System/Library/Automator/Run Shell Script.action/Contents/Resources/English.lproj/main.nib</string>
-            </dict>
-            <key>isViewVisible</key>
-            <true/>
-        </dict>
+        <string>/bin/bash</string>
+        <string>$WATCHER_PATH</string>
     </array>
-    <key>connectors</key>
-    <dict/>
-    <key>workflowMetaData</key>
-    <dict>
-        <key>folderActionFolderPath</key>
-        <string>$PRE_EDITAR_DIR</string>
-        <key>workflowTypeIdentifier</key>
-        <string>com.apple.Automator.folderaction</string>
-    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>$HOME/Music/.stems_log.txt</string>
+    <key>StandardErrorPath</key>
+    <string>$HOME/Music/.stems_error.txt</string>
 </dict>
 </plist>
-WFLOWEOF
+PLISTEOF
 
-echo -e "  ${GREEN}✓ Workflow creado${NC}"
-
-# Activar Folder Actions via osascript
-osascript << APPLESCRIPT
-tell application "System Events"
-    set folder actions enabled to true
-end tell
-APPLESCRIPT
+launchctl load "$PLIST_PATH"
+echo -e "  ${GREEN}✓ Vigilante activo — revisa Pre Editar cada 5 segundos${NC}"
 
 echo ""
 echo -e "${GREEN}╔════════════════════════════════════════╗${NC}"
 echo -e "${GREEN}║        ✅  Instalación completa        ║${NC}"
 echo -e "${GREEN}╚════════════════════════════════════════╝${NC}"
 echo ""
-echo "  Solo falta conectar Automator a tu carpeta:"
-echo ""
-echo -e "  ${YELLOW}1.${NC} Abre Finder y ve a tu carpeta 'Pre Editar'"
-echo -e "  ${YELLOW}2.${NC} Clic derecho → 'Folder Actions Setup...'"
-echo -e "  ${YELLOW}3.${NC} Haz clic en '+' del lado derecho"
-echo -e "  ${YELLOW}4.${NC} Selecciona 'Stems Auto' y haz clic en 'Attach'"
-echo ""
-echo -e "  Tu carpeta Pre Editar está en:"
+echo -e "  🎵 Suelta canciones en:"
 echo -e "  ${BLUE}$PRE_EDITAR_DIR${NC}"
 echo ""
+echo -e "  📂 Los stems aparecerán en:"
+echo -e "  ${BLUE}$PROYECTOS_DIR${NC}"
+echo ""
+echo -e "  🔔 Recibirás notificación cuando terminen."
+echo ""
 
-# Abrir la carpeta en Finder para facilitar el último paso
 open "$PRE_EDITAR_DIR"
