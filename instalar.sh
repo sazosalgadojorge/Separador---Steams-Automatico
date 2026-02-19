@@ -80,7 +80,20 @@ echo "     → Editar:     $PROYECTOS_DIR"
 echo -e "${YELLOW}[5/6] Instalando script principal...${NC}"
 cat > "$SCRIPT_PATH" << 'SCRIPTEOF'
 #!/bin/bash
-export PATH="$HOME/.local/bin:/opt/homebrew/bin:$PATH"
+
+# Buscar demucs en todas las rutas posibles
+DEMUCS_BIN=""
+for ruta in "$HOME/.local/bin/demucs" "/opt/homebrew/bin/demucs" "/usr/local/bin/demucs"; do
+    if [ -f "$ruta" ]; then
+        DEMUCS_BIN="$ruta"
+        break
+    fi
+done
+
+if [ -z "$DEMUCS_BIN" ]; then
+    osascript -e "display notification \"❌ Demucs no encontrado. Reinstala.\" with title \"Separador de Stems\" sound name \"Basso\""
+    exit 1
+fi
 
 PROYECTOS_DIR="$HOME/Music/Editar"
 
@@ -90,13 +103,11 @@ RED='\033[0;31m'
 NC='\033[0m'
 
 if [ -z "$1" ]; then
-    echo -e "${RED}❌ No se indicó ningún archivo.${NC}"
     exit 1
 fi
 
 ARCHIVO="$1"
 if [ ! -f "$ARCHIVO" ]; then
-    echo -e "${RED}❌ El archivo no existe: $ARCHIVO${NC}"
     exit 1
 fi
 
@@ -110,10 +121,6 @@ fi
 NOMBRE=$(basename "$ARCHIVO")
 NOMBRE_LIMPIO="${NOMBRE%.*}"
 
-echo ""
-echo -e "${GREEN}🎵 Procesando: $NOMBRE_LIMPIO${NC}"
-echo "────────────────────────────────────"
-
 CARPETA_PROYECTO="$PROYECTOS_DIR/$NOMBRE_LIMPIO"
 CARPETA_STEMS="$CARPETA_PROYECTO/Stems"
 CARPETA_AUDIO="$CARPETA_PROYECTO/Audio"
@@ -122,14 +129,11 @@ CARPETA_ABLETON="$CARPETA_PROYECTO/Ableton"
 mkdir -p "$CARPETA_STEMS" "$CARPETA_AUDIO" "$CARPETA_ABLETON"
 cp "$ARCHIVO" "$CARPETA_AUDIO/"
 
-echo -e "📁 Proyecto en: ${YELLOW}$CARPETA_PROYECTO${NC}"
-echo ""
-echo -e "🔪 Separando stems con Demucs..."
+osascript -e "display notification \"⏳ Procesando: $NOMBRE_LIMPIO\" with title \"Separador de Stems\""
 
-demucs -n htdemucs --out "$CARPETA_STEMS" "$ARCHIVO"
+"$DEMUCS_BIN" -n htdemucs --out "$CARPETA_STEMS" "$ARCHIVO"
 
 if [ $? -ne 0 ]; then
-    echo -e "${RED}❌ Demucs encontró un error.${NC}"
     osascript -e "display notification \"❌ Error al procesar: $NOMBRE_LIMPIO\" with title \"Separador de Stems\" sound name \"Basso\""
     exit 1
 fi
@@ -144,12 +148,6 @@ for STEM in "$CARPETA_STEMS"/*.wav; do
     STEM_NOMBRE=$(basename "$STEM")
     mv "$STEM" "$CARPETA_STEMS/${NOMBRE_LIMPIO}_${STEM_NOMBRE}"
 done
-
-echo ""
-echo -e "${GREEN}✅ ¡Listo! Stems generados:${NC}"
-ls "$CARPETA_STEMS"
-echo ""
-echo -e "${YELLOW}💡 Arrastra la carpeta Stems directo a Ableton Live${NC}"
 
 osascript -e "display notification \"✅ Stems listos: $NOMBRE_LIMPIO\" with title \"Separador de Stems\" sound name \"Glass\""
 SCRIPTEOF
