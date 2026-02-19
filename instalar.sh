@@ -54,7 +54,15 @@ if [ -z "$PYTHON311" ]; then
 fi
 echo -e "  ${GREEN}✓ Python 3.11: $PYTHON311${NC}"
 
-# ── PASO 3: pipx ──
+# ── PASO 3: FFmpeg ──
+echo -e "${YELLOW}[3/7] Verificando FFmpeg...${NC}"
+if ! command -v ffmpeg &> /dev/null; then
+    echo "  Instalando FFmpeg..."
+    brew install ffmpeg
+fi
+echo -e "  ${GREEN}✓ FFmpeg listo${NC}"
+
+# ── PASO 4: pipx ──
 echo -e "${YELLOW}[3/7] Verificando pipx...${NC}"
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 if ! command -v pipx &> /dev/null; then
@@ -72,7 +80,7 @@ done
 if [ -z "$DEMUCS_BIN" ]; then
     echo "  Instalando Demucs (puede tardar varios minutos)..."
     pipx install demucs --python "$PYTHON311"
-    pipx inject demucs soundfile
+    pipx inject demucs soundfile torchcodec
     for d in "$HOME/.local/bin/demucs" "/opt/homebrew/bin/demucs" "/usr/local/bin/demucs" "$HOME/.local/pipx/venvs/demucs/bin/demucs"; do
         [ -f "$d" ] && DEMUCS_BIN="$d" && break
     done
@@ -152,12 +160,12 @@ cat > "$WATCHER_PATH" << WATCHEOF
 #!/bin/bash
 export PATH="\$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:\$PATH"
 WATCH_DIR="\$HOME/Music/Pre Editar"
-PROCESSED="\$HOME/Music/.stems_procesados"
-touch "\$PROCESSED"
 while true; do
     find "\$WATCH_DIR" -maxdepth 1 \( -name "*.mp3" -o -name "*.wav" -o -name "*.flac" -o -name "*.m4a" -o -name "*.aiff" \) | while read -r FILE; do
-        if ! grep -qF "\$FILE" "\$PROCESSED"; then
-            echo "\$FILE" >> "\$PROCESSED"
+        NOMBRE=$(basename "\$FILE")
+        NOMBRE_LIMPIO="${NOMBRE%.*}"
+        STEMS_DIR="\$HOME/Music/Editar/\$NOMBRE_LIMPIO/Stems"
+        if [ ! -d "\$STEMS_DIR" ] || [ -z "$(ls -A \"\$STEMS_DIR\" 2>/dev/null)" ]; then
             bash "\$HOME/Music/separar_stems.sh" "\$FILE" &
         fi
     done
