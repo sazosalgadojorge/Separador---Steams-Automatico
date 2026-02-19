@@ -7,7 +7,6 @@
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-RED='\033[0;31d'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
@@ -16,7 +15,8 @@ PROYECTOS_DIR="$HOME/Music/Editar"
 PRE_EDITAR_DIR="$HOME/Music/Pre Editar"
 SCRIPT_PATH="$MUSIC_DIR/separar_stems.sh"
 WATCHER_PATH="$MUSIC_DIR/watcher_stems.sh"
-PLIST_PATH="$HOME/Library/LaunchAgents/com.stemsauto.watcher.plist"
+LAUNCH_AGENTS_DIR="$HOME/Library/LaunchAgents"
+PLIST_PATH="$LAUNCH_AGENTS_DIR/com.stemsauto.watcher.plist"
 
 echo ""
 echo -e "${BLUE}╔════════════════════════════════════════╗${NC}"
@@ -27,12 +27,13 @@ echo ""
 # ── PASO 1: Homebrew ──
 echo -e "${YELLOW}[1/7] Verificando Homebrew...${NC}"
 if ! command -v brew &> /dev/null; then
-    echo "  Instalando Homebrew..."
+    echo "  Instalando Homebrew (puede tardar varios minutos)..."
     /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 fi
+# Cargar brew en PATH (Apple Silicon y Intel)
 if [ -f "/opt/homebrew/bin/brew" ]; then
     eval "$(/opt/homebrew/bin/brew shellenv)"
-    echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> "$HOME/.zprofile"
+    grep -q 'opt/homebrew' "$HOME/.zprofile" 2>/dev/null || echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> "$HOME/.zprofile"
 elif [ -f "/usr/local/bin/brew" ]; then
     eval "$(/usr/local/bin/brew shellenv)"
 fi
@@ -42,37 +43,38 @@ echo -e "  ${GREEN}✓ Homebrew listo${NC}"
 echo -e "${YELLOW}[2/7] Verificando Python 3.11...${NC}"
 PYTHON311=""
 for p in "/opt/homebrew/bin/python3.11" "/usr/local/bin/python3.11"; do
-    if [ -f "$p" ]; then PYTHON311="$p"; break; fi
+    [ -f "$p" ] && PYTHON311="$p" && break
 done
 if [ -z "$PYTHON311" ]; then
     echo "  Instalando Python 3.11..."
     brew install python@3.11
     for p in "/opt/homebrew/bin/python3.11" "/usr/local/bin/python3.11"; do
-        if [ -f "$p" ]; then PYTHON311="$p"; break; fi
+        [ -f "$p" ] && PYTHON311="$p" && break
     done
 fi
 echo -e "  ${GREEN}✓ Python 3.11: $PYTHON311${NC}"
 
 # ── PASO 3: pipx ──
 echo -e "${YELLOW}[3/7] Verificando pipx...${NC}"
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 if ! command -v pipx &> /dev/null; then
     brew install pipx
+    export PATH="$HOME/.local/bin:$PATH"
 fi
-export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 echo -e "  ${GREEN}✓ pipx listo${NC}"
 
 # ── PASO 4: Demucs ──
 echo -e "${YELLOW}[4/7] Instalando Demucs...${NC}"
 DEMUCS_BIN=""
 for d in "$HOME/.local/bin/demucs" "/opt/homebrew/bin/demucs" "/usr/local/bin/demucs" "$HOME/.local/pipx/venvs/demucs/bin/demucs"; do
-    if [ -f "$d" ]; then DEMUCS_BIN="$d"; break; fi
+    [ -f "$d" ] && DEMUCS_BIN="$d" && break
 done
-
 if [ -z "$DEMUCS_BIN" ]; then
+    echo "  Instalando Demucs (puede tardar varios minutos)..."
     pipx install demucs --python "$PYTHON311"
     pipx inject demucs soundfile
     for d in "$HOME/.local/bin/demucs" "/opt/homebrew/bin/demucs" "/usr/local/bin/demucs" "$HOME/.local/pipx/venvs/demucs/bin/demucs"; do
-        if [ -f "$d" ]; then DEMUCS_BIN="$d"; break; fi
+        [ -f "$d" ] && DEMUCS_BIN="$d" && break
     done
 fi
 echo -e "  ${GREEN}✓ Demucs: $DEMUCS_BIN${NC}"
@@ -81,6 +83,7 @@ echo -e "  ${GREEN}✓ Demucs: $DEMUCS_BIN${NC}"
 echo -e "${YELLOW}[5/7] Creando carpetas...${NC}"
 mkdir -p "$PROYECTOS_DIR"
 mkdir -p "$PRE_EDITAR_DIR"
+mkdir -p "$LAUNCH_AGENTS_DIR"   # <-- esto es lo que faltaba
 echo -e "  ${GREEN}✓ Carpetas creadas${NC}"
 
 # ── PASO 6: Script principal ──
@@ -90,7 +93,7 @@ cat > "$SCRIPT_PATH" << SCRIPTEOF
 
 DEMUCS_BIN=""
 for d in "\$HOME/.local/bin/demucs" "/opt/homebrew/bin/demucs" "/usr/local/bin/demucs" "\$HOME/.local/pipx/venvs/demucs/bin/demucs"; do
-    if [ -f "\$d" ]; then DEMUCS_BIN="\$d"; break; fi
+    [ -f "\$d" ] && DEMUCS_BIN="\$d" && break
 done
 
 if [ -z "\$DEMUCS_BIN" ]; then
@@ -101,13 +104,11 @@ fi
 PROYECTOS_DIR="\$HOME/Music/Editar"
 ARCHIVO="\$1"
 
-if [ -z "\$ARCHIVO" ] || [ ! -f "\$ARCHIVO" ]; then exit 1; fi
+[ -z "\$ARCHIVO" ] || [ ! -f "\$ARCHIVO" ] && exit 1
 
 EXT="\${ARCHIVO##*.}"
 EXT=\$(echo "\$EXT" | tr '[:upper:]' '[:lower:]')
-if [[ "\$EXT" != "mp3" && "\$EXT" != "wav" && "\$EXT" != "flac" && "\$EXT" != "m4a" && "\$EXT" != "aiff" ]]; then
-    exit 0
-fi
+[[ "\$EXT" != "mp3" && "\$EXT" != "wav" && "\$EXT" != "flac" && "\$EXT" != "m4a" && "\$EXT" != "aiff" ]] && exit 0
 
 NOMBRE=\$(basename "\$ARCHIVO")
 NOMBRE_LIMPIO="\${NOMBRE%.*}"
@@ -141,7 +142,6 @@ done
 
 osascript -e "display notification \"✅ Stems listos: \$NOMBRE_LIMPIO\" with title \"Separador de Stems\" sound name \"Glass\""
 SCRIPTEOF
-
 chmod +x "$SCRIPT_PATH"
 echo -e "  ${GREEN}✓ Script principal listo${NC}"
 
@@ -154,7 +154,6 @@ export PATH="\$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:\$PATH"
 WATCH_DIR="\$HOME/Music/Pre Editar"
 PROCESSED="\$HOME/Music/.stems_procesados"
 touch "\$PROCESSED"
-
 while true; do
     find "\$WATCH_DIR" -maxdepth 1 \( -name "*.mp3" -o -name "*.wav" -o -name "*.flac" -o -name "*.m4a" -o -name "*.aiff" \) | while read -r FILE; do
         if ! grep -qF "\$FILE" "\$PROCESSED"; then
@@ -165,12 +164,12 @@ while true; do
     sleep 5
 done
 WATCHEOF
-
 chmod +x "$WATCHER_PATH"
 
 # Detener watcher anterior si existe
 launchctl unload "$PLIST_PATH" 2>/dev/null
 
+# Escribir plist — la carpeta ya existe gracias al paso 5
 cat > "$PLIST_PATH" << PLISTEOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -196,7 +195,21 @@ cat > "$PLIST_PATH" << PLISTEOF
 PLISTEOF
 
 launchctl load "$PLIST_PATH"
-echo -e "  ${GREEN}✓ Vigilante activo — revisa Pre Editar cada 5 segundos${NC}"
+
+# Verificar que arrancó
+sleep 2
+if launchctl list | grep -q "com.stemsauto.watcher"; then
+    echo -e "  ${GREEN}✓ Vigilante activo y corriendo${NC}"
+else
+    echo -e "  Intentando método alternativo..."
+    launchctl bootstrap gui/$(id -u) "$PLIST_PATH" 2>/dev/null
+    sleep 2
+    if launchctl list | grep -q "com.stemsauto.watcher"; then
+        echo -e "  ${GREEN}✓ Vigilante activo${NC}"
+    else
+        echo -e "  ⚠️  Reinicia el Mac para activar el vigilante."
+    fi
+fi
 
 echo ""
 echo -e "${GREEN}╔════════════════════════════════════════╗${NC}"
