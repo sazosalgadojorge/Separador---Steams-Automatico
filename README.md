@@ -9,7 +9,7 @@ Automatización completa para separar stems con **Demucs** en Mac. Suelta una ca
 Abre **Terminal** y pega esto:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/sazosalgadojorge/Separador---Steams-Automatico/main/instalar.sh | bash
+curl -fsSL https://raw.githubusercontent.com/sazosalgadojorge/Separador-Steams-Automatico/main/instalar.sh | bash
 ```
 
 El instalador hace todo automáticamente:
