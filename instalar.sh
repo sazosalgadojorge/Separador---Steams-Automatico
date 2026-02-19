@@ -2,12 +2,15 @@
 
 # ============================================================
 #  INSTALADOR AUTOMÁTICO — Separador de Stems
-#  Compatible con cualquier Mac con macOS 12+
+#  Compatible con cualquier Mac con macOS 12+ (Intel y Apple Silicon)
 # ============================================================
+
+set -euo pipefail
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+RED='\033[0;31m'
 NC='\033[0m'
 
 MUSIC_DIR="$HOME/Music"
@@ -17,6 +20,12 @@ SCRIPT_PATH="$MUSIC_DIR/separar_stems.sh"
 WATCHER_PATH="$MUSIC_DIR/watcher_stems.sh"
 LAUNCH_AGENTS_DIR="$HOME/Library/LaunchAgents"
 PLIST_PATH="$LAUNCH_AGENTS_DIR/com.stemsauto.watcher.plist"
+SERVICE_LABEL="com.stemsauto.watcher"
+
+abort() {
+    echo -e "${RED}✖ Error: $1${NC}" >&2
+    exit 1
+}
 
 echo ""
 echo -e "${BLUE}╔════════════════════════════════════════╗${NC}"
@@ -24,173 +33,207 @@ echo -e "${BLUE}║     🎵  Instalador de Stems Auto       ║${NC}"
 echo -e "${BLUE}╚════════════════════════════════════════╝${NC}"
 echo ""
 
+# ── Detectar arquitectura ──
+ARCH=$(uname -m)
+if [ "$ARCH" = "arm64" ]; then
+    BREW_PREFIX="/opt/homebrew"
+else
+    BREW_PREFIX="/usr/local"
+fi
+
 # ── PASO 1: Homebrew ──
-echo -e "${YELLOW}[1/7] Verificando Homebrew...${NC}"
+echo -e "${YELLOW}[1/6] Verificando Homebrew...${NC}"
 if ! command -v brew &> /dev/null; then
     echo "  Instalando Homebrew (puede tardar varios minutos)..."
-    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" \
+        || abort "No se pudo instalar Homebrew."
 fi
-# Cargar brew en PATH (Apple Silicon y Intel)
-if [ -f "/opt/homebrew/bin/brew" ]; then
-    eval "$(/opt/homebrew/bin/brew shellenv)"
-    grep -q 'opt/homebrew' "$HOME/.zprofile" 2>/dev/null || echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> "$HOME/.zprofile"
-elif [ -f "/usr/local/bin/brew" ]; then
-    eval "$(/usr/local/bin/brew shellenv)"
+# Cargar brew en PATH según arquitectura
+if [ -f "$BREW_PREFIX/bin/brew" ]; then
+    eval "$($BREW_PREFIX/bin/brew shellenv)"
+    grep -q "homebrew" "$HOME/.zprofile" 2>/dev/null \
+        || echo "eval \"\$($BREW_PREFIX/bin/brew shellenv)\"" >> "$HOME/.zprofile"
 fi
-echo -e "  ${GREEN}✓ Homebrew listo${NC}"
+command -v brew &>/dev/null || abort "Homebrew instalado pero no encontrado en PATH."
+echo -e "  ${GREEN}✓ Homebrew $(brew --version | head -1)${NC}"
 
 # ── PASO 2: Python 3.11 ──
-echo -e "${YELLOW}[2/7] Verificando Python 3.11...${NC}"
+echo -e "${YELLOW}[2/6] Verificando Python 3.11...${NC}"
 PYTHON311=""
-for p in "/opt/homebrew/bin/python3.11" "/usr/local/bin/python3.11"; do
-    [ -f "$p" ] && PYTHON311="$p" && break
+for p in "$BREW_PREFIX/bin/python3.11" "/usr/local/bin/python3.11"; do
+    [ -x "$p" ] && PYTHON311="$p" && break
 done
 if [ -z "$PYTHON311" ]; then
     echo "  Instalando Python 3.11..."
-    brew install python@3.11
-    for p in "/opt/homebrew/bin/python3.11" "/usr/local/bin/python3.11"; do
-        [ -f "$p" ] && PYTHON311="$p" && break
+    brew install python@3.11 || abort "No se pudo instalar Python 3.11."
+    for p in "$BREW_PREFIX/bin/python3.11" "/usr/local/bin/python3.11"; do
+        [ -x "$p" ] && PYTHON311="$p" && break
     done
 fi
+[ -z "$PYTHON311" ] && abort "Python 3.11 no encontrado tras la instalación."
 echo -e "  ${GREEN}✓ Python 3.11: $PYTHON311${NC}"
 
 # ── PASO 3: FFmpeg ──
-echo -e "${YELLOW}[3/7] Verificando FFmpeg...${NC}"
+echo -e "${YELLOW}[3/6] Verificando FFmpeg...${NC}"
 if ! command -v ffmpeg &> /dev/null; then
     echo "  Instalando FFmpeg..."
-    brew install ffmpeg
+    brew install ffmpeg || abort "No se pudo instalar FFmpeg."
 fi
-echo -e "  ${GREEN}✓ FFmpeg listo${NC}"
+echo -e "  ${GREEN}✓ FFmpeg $(ffmpeg -version 2>&1 | head -1 | awk '{print $3}')${NC}"
 
 # ── PASO 4: pipx ──
-echo -e "${YELLOW}[3/7] Verificando pipx...${NC}"
-export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+echo -e "${YELLOW}[4/6] Verificando pipx...${NC}"
+export PATH="$HOME/.local/bin:$BREW_PREFIX/bin:/usr/local/bin:$PATH"
 if ! command -v pipx &> /dev/null; then
-    brew install pipx
+    echo "  Instalando pipx..."
+    brew install pipx || abort "No se pudo instalar pipx."
+    pipx ensurepath --force 2>/dev/null || true
     export PATH="$HOME/.local/bin:$PATH"
 fi
-echo -e "  ${GREEN}✓ pipx listo${NC}"
+command -v pipx &>/dev/null || abort "pipx instalado pero no encontrado en PATH."
+echo -e "  ${GREEN}✓ pipx $(pipx --version)${NC}"
 
-# ── PASO 4: Demucs ──
-echo -e "${YELLOW}[4/7] Instalando Demucs...${NC}"
+# ── PASO 5: Demucs ──
+echo -e "${YELLOW}[5/6] Verificando Demucs...${NC}"
 DEMUCS_BIN=""
-for d in "$HOME/.local/bin/demucs" "/opt/homebrew/bin/demucs" "/usr/local/bin/demucs" "$HOME/.local/pipx/venvs/demucs/bin/demucs"; do
-    [ -f "$d" ] && DEMUCS_BIN="$d" && break
+for d in "$HOME/.local/bin/demucs" "$BREW_PREFIX/bin/demucs" "/usr/local/bin/demucs"; do
+    [ -x "$d" ] && DEMUCS_BIN="$d" && break
 done
+
 if [ -z "$DEMUCS_BIN" ]; then
-    echo "  Instalando Demucs (puede tardar varios minutos)..."
-    pipx install demucs --python "$PYTHON311"
-    pipx inject demucs soundfile torchcodec
-    for d in "$HOME/.local/bin/demucs" "/opt/homebrew/bin/demucs" "/usr/local/bin/demucs" "$HOME/.local/pipx/venvs/demucs/bin/demucs"; do
-        [ -f "$d" ] && DEMUCS_BIN="$d" && break
+    echo "  Instalando Demucs con Python 3.11 (puede tardar varios minutos)..."
+    pipx install demucs --python "$PYTHON311" || abort "No se pudo instalar Demucs."
+    for d in "$HOME/.local/bin/demucs" "$BREW_PREFIX/bin/demucs" "/usr/local/bin/demucs"; do
+        [ -x "$d" ] && DEMUCS_BIN="$d" && break
     done
 fi
+[ -z "$DEMUCS_BIN" ] && abort "Demucs no encontrado tras la instalación."
+
+# Inyectar soundfile (necesario para .flac y algunos .wav)
+echo "  Verificando dependencias de Demucs..."
+if ! pipx runpip demucs show soundfile &>/dev/null; then
+    echo "  Instalando soundfile..."
+    pipx inject demucs soundfile || abort "No se pudo inyectar soundfile en Demucs."
+fi
+
 echo -e "  ${GREEN}✓ Demucs: $DEMUCS_BIN${NC}"
 
-# ── PASO 5: Carpetas ──
-echo -e "${YELLOW}[5/7] Creando carpetas...${NC}"
+# ── PASO 6: Carpetas, scripts y servicio ──
+echo -e "${YELLOW}[6/6] Instalando scripts y servicio...${NC}"
+
 mkdir -p "$PROYECTOS_DIR"
 mkdir -p "$PRE_EDITAR_DIR"
-mkdir -p "$LAUNCH_AGENTS_DIR"   # <-- esto es lo que faltaba
-echo -e "  ${GREEN}✓ Carpetas creadas${NC}"
+mkdir -p "$LAUNCH_AGENTS_DIR"
 
-# ── PASO 6: Script principal ──
-echo -e "${YELLOW}[6/7] Instalando script principal...${NC}"
-cat > "$SCRIPT_PATH" << SCRIPTEOF
+# ── Script principal de separación ──
+cat > "$SCRIPT_PATH" << 'SCRIPTEOF'
 #!/bin/bash
 
 DEMUCS_BIN=""
-for d in "\$HOME/.local/bin/demucs" "/opt/homebrew/bin/demucs" "/usr/local/bin/demucs" "\$HOME/.local/pipx/venvs/demucs/bin/demucs"; do
-    [ -f "\$d" ] && DEMUCS_BIN="\$d" && break
+for d in "$HOME/.local/bin/demucs" "/opt/homebrew/bin/demucs" "/usr/local/bin/demucs"; do
+    [ -x "$d" ] && DEMUCS_BIN="$d" && break
 done
 
-if [ -z "\$DEMUCS_BIN" ]; then
-    osascript -e "display notification \"❌ Demucs no encontrado. Reinstala.\" with title \"Separador de Stems\" sound name \"Basso\""
+if [ -z "$DEMUCS_BIN" ]; then
+    osascript -e 'display notification "❌ Demucs no encontrado. Reinstala." with title "Separador de Stems" sound name "Basso"'
     exit 1
 fi
 
-PROYECTOS_DIR="\$HOME/Music/Editar"
-ARCHIVO="\$1"
+PROYECTOS_DIR="$HOME/Music/Editar"
+ARCHIVO="$1"
 
-[ -z "\$ARCHIVO" ] || [ ! -f "\$ARCHIVO" ] && exit 1
+[ -z "$ARCHIVO" ] || [ ! -f "$ARCHIVO" ] && exit 1
 
-EXT="\${ARCHIVO##*.}"
-EXT=\$(echo "\$EXT" | tr '[:upper:]' '[:lower:]')
-[[ "\$EXT" != "mp3" && "\$EXT" != "wav" && "\$EXT" != "flac" && "\$EXT" != "m4a" && "\$EXT" != "aiff" ]] && exit 0
+EXT="${ARCHIVO##*.}"
+EXT=$(echo "$EXT" | tr '[:upper:]' '[:lower:]')
+case "$EXT" in
+    mp3|wav|flac|m4a|aiff) ;;
+    *) exit 0 ;;
+esac
 
-NOMBRE=\$(basename "\$ARCHIVO")
-NOMBRE_LIMPIO="\${NOMBRE%.*}"
-CARPETA_PROYECTO="\$PROYECTOS_DIR/\$NOMBRE_LIMPIO"
-CARPETA_STEMS="\$CARPETA_PROYECTO/Stems"
-CARPETA_AUDIO="\$CARPETA_PROYECTO/Audio"
-CARPETA_ABLETON="\$CARPETA_PROYECTO/Ableton"
+NOMBRE=$(basename "$ARCHIVO")
+NOMBRE_LIMPIO="${NOMBRE%.*}"
+CARPETA_PROYECTO="$PROYECTOS_DIR/$NOMBRE_LIMPIO"
+CARPETA_STEMS="$CARPETA_PROYECTO/Stems"
+CARPETA_AUDIO="$CARPETA_PROYECTO/Audio"
+CARPETA_ABLETON="$CARPETA_PROYECTO/Ableton"
 
-mkdir -p "\$CARPETA_STEMS" "\$CARPETA_AUDIO" "\$CARPETA_ABLETON"
-cp "\$ARCHIVO" "\$CARPETA_AUDIO/"
+mkdir -p "$CARPETA_STEMS" "$CARPETA_AUDIO" "$CARPETA_ABLETON"
+cp "$ARCHIVO" "$CARPETA_AUDIO/"
 
-osascript -e "display notification \"⏳ Separando stems: \$NOMBRE_LIMPIO\" with title \"Separador de Stems\""
+osascript -e "display notification \"⏳ Separando stems: $NOMBRE_LIMPIO\" with title \"Separador de Stems\""
 
-"\$DEMUCS_BIN" -n htdemucs --out "\$CARPETA_STEMS" "\$ARCHIVO"
+"$DEMUCS_BIN" -n htdemucs --out "$CARPETA_STEMS" "$ARCHIVO"
 
-if [ \$? -ne 0 ]; then
-    osascript -e "display notification \"❌ Error: \$NOMBRE_LIMPIO\" with title \"Separador de Stems\" sound name \"Basso\""
+if [ $? -ne 0 ]; then
+    osascript -e "display notification \"❌ Error al separar: $NOMBRE_LIMPIO\" with title \"Separador de Stems\" sound name \"Basso\""
     exit 1
 fi
 
-STEMS_GENERADOS="\$CARPETA_STEMS/htdemucs/\$NOMBRE_LIMPIO"
-if [ -d "\$STEMS_GENERADOS" ]; then
-    mv "\$STEMS_GENERADOS"/*.wav "\$CARPETA_STEMS/"
-    rm -rf "\$CARPETA_STEMS/htdemucs"
+STEMS_GENERADOS="$CARPETA_STEMS/htdemucs/$NOMBRE_LIMPIO"
+if [ -d "$STEMS_GENERADOS" ]; then
+    # Mover y renombrar solo si hay archivos wav
+    shopt -s nullglob
+    WAV_FILES=("$STEMS_GENERADOS"/*.wav)
+    shopt -u nullglob
+    if [ ${#WAV_FILES[@]} -gt 0 ]; then
+        for STEM in "${WAV_FILES[@]}"; do
+            STEM_NOMBRE=$(basename "$STEM")
+            mv "$STEM" "$CARPETA_STEMS/${NOMBRE_LIMPIO}_${STEM_NOMBRE}"
+        done
+    fi
+    rm -rf "$CARPETA_STEMS/htdemucs"
 fi
 
-for STEM in "\$CARPETA_STEMS"/*.wav; do
-    STEM_NOMBRE=\$(basename "\$STEM")
-    mv "\$STEM" "\$CARPETA_STEMS/\${NOMBRE_LIMPIO}_\${STEM_NOMBRE}"
-done
-
-osascript -e "display notification \"✅ Stems listos: \$NOMBRE_LIMPIO\" with title \"Separador de Stems\" sound name \"Glass\""
+osascript -e "display notification \"✅ Stems listos: $NOMBRE_LIMPIO\" with title \"Separador de Stems\" sound name \"Glass\""
 SCRIPTEOF
 chmod +x "$SCRIPT_PATH"
-echo -e "  ${GREEN}✓ Script principal listo${NC}"
 
-# ── PASO 7: Watcher con launchd ──
-echo -e "${YELLOW}[7/7] Configurando vigilante de carpeta...${NC}"
-
-cat > "$WATCHER_PATH" << WATCHEOF
+# ── Script watcher ──
+cat > "$WATCHER_PATH" << 'WATCHEOF'
 #!/bin/bash
-export PATH="\$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:\$PATH"
-WATCH_DIR="\$HOME/Music/Pre Editar"
-PROYECTOS_DIR="\$HOME/Music/Editar"
-PROCESSED="\$HOME/Music/.stems_procesados"
-touch "\$PROCESSED"
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+WATCH_DIR="$HOME/Music/Pre Editar"
+PROYECTOS_DIR="$HOME/Music/Editar"
+PROCESSED="$HOME/Music/.stems_procesados"
+touch "$PROCESSED"
 
 while true; do
-    find "\$WATCH_DIR" -maxdepth 1 \( -name "*.mp3" -o -name "*.wav" -o -name "*.flac" -o -name "*.m4a" -o -name "*.aiff" \) | while read -r FILE; do
-        NOMBRE=\$(basename "\$FILE")
-        NOMBRE_LIMPIO="\${NOMBRE%.*}"
-        STEMS_DIR="\$PROYECTOS_DIR/\$NOMBRE_LIMPIO/Stems"
-        STEM_COUNT=\$(find "\$STEMS_DIR" -name "*.wav" 2>/dev/null | wc -l | tr -d ' ')
-        if ! grep -qF "\$FILE" "\$PROCESSED" && [ "\$STEM_COUNT" -lt 4 ]; then
-            echo "\$FILE" >> "\$PROCESSED"
-            bash "\$HOME/Music/separar_stems.sh" "\$FILE" &
+    while IFS= read -r FILE; do
+        NOMBRE=$(basename "$FILE")
+        NOMBRE_LIMPIO="${NOMBRE%.*}"
+        STEMS_DIR="$PROYECTOS_DIR/$NOMBRE_LIMPIO/Stems"
+
+        shopt -s nullglob
+        STEM_ARRAY=("$STEMS_DIR"/*.wav)
+        shopt -u nullglob
+        STEM_COUNT=${#STEM_ARRAY[@]}
+
+        if ! grep -qF "$FILE" "$PROCESSED" && [ "$STEM_COUNT" -lt 4 ]; then
+            echo "$FILE" >> "$PROCESSED"
+            bash "$HOME/Music/separar_stems.sh" "$FILE" &
         fi
-    done
+    done < <(find "$WATCH_DIR" -maxdepth 1 \( -name "*.mp3" -o -name "*.wav" -o -name "*.flac" -o -name "*.m4a" -o -name "*.aiff" \) 2>/dev/null)
+
     sleep 5
 done
 WATCHEOF
 chmod +x "$WATCHER_PATH"
 
-# Detener watcher anterior si existe
-launchctl unload "$PLIST_PATH" 2>/dev/null
+# ── Instalar servicio launchd ──
+# Detener servicio existente usando la API correcta (compatible con macOS 12+)
+if launchctl list "$SERVICE_LABEL" &>/dev/null 2>&1; then
+    launchctl bootout "gui/$(id -u)/$SERVICE_LABEL" 2>/dev/null || true
+fi
 
-# Escribir plist — la carpeta ya existe gracias al paso 5
 cat > "$PLIST_PATH" << PLISTEOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.stemsauto.watcher</string>
+    <string>$SERVICE_LABEL</string>
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
@@ -201,29 +244,28 @@ cat > "$PLIST_PATH" << PLISTEOF
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>$HOME/Music/.stems_log.txt</string>
+    <string>$MUSIC_DIR/.stems_log.txt</string>
     <key>StandardErrorPath</key>
-    <string>$HOME/Music/.stems_error.txt</string>
+    <string>$MUSIC_DIR/.stems_error.txt</string>
 </dict>
 </plist>
 PLISTEOF
 
-launchctl load "$PLIST_PATH"
+# Cargar con la API moderna (macOS 12+)
+launchctl bootstrap "gui/$(id -u)" "$PLIST_PATH" 2>/dev/null || true
 
-# Verificar que arrancó
 sleep 2
-if launchctl list | grep -q "com.stemsauto.watcher"; then
-    echo -e "  ${GREEN}✓ Vigilante activo y corriendo${NC}"
+if launchctl list "$SERVICE_LABEL" &>/dev/null 2>&1; then
+    echo -e "  ${GREEN}✓ Scripts instalados${NC}"
+    echo -e "  ${GREEN}✓ Vigilante activo (arranca automáticamente al iniciar sesión)${NC}"
 else
-    echo -e "  Intentando método alternativo..."
-    launchctl bootstrap gui/$(id -u) "$PLIST_PATH" 2>/dev/null
-    sleep 2
-    if launchctl list | grep -q "com.stemsauto.watcher"; then
-        echo -e "  ${GREEN}✓ Vigilante activo${NC}"
-    else
-        echo -e "  ⚠️  Reinicia el Mac para activar el vigilante."
-    fi
+    echo -e "  ${YELLOW}⚠  Vigilante instalado. Si no arranca, reinicia sesión una vez.${NC}"
 fi
+
+# ── Alias en .zshrc (método seguro) ──
+ALIAS_LINE='alias stems-limpiar='"'"'> "$HOME/Music/.stems_procesados" && echo "Registro limpiado. Las canciones en Pre Editar se reprocesarán."'"'"
+grep -qF "stems-limpiar" "$HOME/.zshrc" 2>/dev/null \
+    || echo "$ALIAS_LINE" >> "$HOME/.zshrc"
 
 echo ""
 echo -e "${GREEN}╔════════════════════════════════════════╗${NC}"
@@ -238,9 +280,7 @@ echo -e "  ${BLUE}$PROYECTOS_DIR${NC}"
 echo ""
 echo -e "  🔔 Recibirás notificación cuando terminen."
 echo ""
-
-# Agregar alias stems-limpiar al zshrc
-grep -q "stems-limpiar" "$HOME/.zshrc" 2>/dev/null || echo 'alias stems-limpiar="> $HOME/Music/.stems_procesados && echo Registro limpiado. Las canciones en Pre Editar se reprocesarán."' >> "$HOME/.zshrc"
-source "$HOME/.zshrc" 2>/dev/null
+echo -e "  💡 Tip: usa ${YELLOW}stems-limpiar${NC} (nueva terminal) para reprocesar canciones."
+echo ""
 
 open "$PRE_EDITAR_DIR"

@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pipx list:*)",
+      "Bash(brew:*)",
+      "Bash(ffmpeg:*)",
+      "Bash(demucs:*)",
+      "Bash(launchctl list:*)",
+      "Bash(sysctl:*)",
+      "Bash(osascript:*)",
+      "Bash(pipx runpip:*)",
+      "Bash(zsh --version)",
+      "Bash(python3:*)"
+    ]
+  }
+}

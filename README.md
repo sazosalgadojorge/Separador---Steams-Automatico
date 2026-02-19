@@ -9,34 +9,33 @@ Automatización completa para separar stems con **Demucs** en Mac. Suelta una ca
 Abre **Terminal** y pega esto:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/TUUSUARIO/stems-auto/main/instalar.sh | bash
+curl -fsSL https://raw.githubusercontent.com/sazosalgadojorge/Separador---Steams-Automatico/main/instalar.sh | bash
 ```
 
-> Reemplaza `TUUSUARIO` con tu usuario de GitHub antes de compartirlo.
-
 El instalador hace todo automáticamente:
-- Instala Homebrew, Python 3.11, pipx y Demucs
-- Crea las carpetas `Pre Editar` y `Editar` en tu Music
-- Instala el script principal
-- Crea el workflow de Automator
 
-Al final solo necesitas **4 clics** para conectar la carpeta (el instalador te guía).
+- Instala Homebrew, Python 3.11, FFmpeg, pipx y Demucs
+- Crea las carpetas `~/Music/Pre Editar` y `~/Music/Editar`
+- Instala el script de separación
+- Activa un servicio en segundo plano (`launchd`) que vigila la carpeta
+
+Compatible con **Apple Silicon (M1/M2/M3)** e **Intel**.
 
 ---
 
 ## 🎬 Cómo funciona
 
 ```
-Sueltas canción en Pre Editar/
+Sueltas canción en ~/Music/Pre Editar/
         ↓
-Automator detecta el archivo
+El servicio detecta el archivo (cada 5 s)
         ↓
-Demucs separa los stems (1-5 min)
+Demucs separa los stems (1–5 min según Mac)
         ↓
 🔔 Notificación en tu Mac
         ↓
-Carpeta lista en Editar/ con:
-  ├── Stems/   → vocals, drums, bass, other
+Carpeta lista en ~/Music/Editar/<nombre>/ con:
+  ├── Stems/   → vocals, drums, bass, other (.wav)
   ├── Audio/   → canción original
   └── Ableton/ → guarda tu .als aquí
 ```
@@ -46,14 +45,18 @@ Carpeta lista en Editar/ con:
 ## 📋 Requisitos
 
 - macOS 12 Monterey o superior
-- Conexión a internet (solo para la instalación)
-- Ableton Live (o cualquier DAW)
+- Conexión a internet (solo durante la instalación)
+- ~4 GB de espacio en disco (modelos de Demucs + dependencias)
 
 ---
 
-## 🔧 Instalación manual (paso a paso)
+## 🔧 Comandos útiles
 
-Si prefieres hacerlo tú mismo, descarga los archivos y sigue la `Guia_Stems_Automatizacion.docx` incluida en el repo.
+| Comando | Descripción |
+|---------|-------------|
+| `stems-limpiar` | Borra el registro de archivos procesados para que se reprocesen |
+
+> Abre una terminal nueva después de instalar para que el alias quede disponible.
 
 ---
 
@@ -62,9 +65,10 @@ Si prefieres hacerlo tú mismo, descarga los archivos y sigue la `Guia_Stems_Aut
 | Error | Solución |
 |-------|----------|
 | `command not found: demucs` | Cierra y vuelve a abrir Terminal |
-| Automator no hace nada | Verifica que "Pass input" sea "as arguments" |
-| Tarda mucho | Normal, Demucs es intensivo. M1/M2 son más rápidos |
-| La notificación no aparece | Ve a Configuración → Notificaciones → Automator → Alertas |
+| El servicio no arranca | Cierra sesión y vuelve a entrar, o reinicia el Mac |
+| Tarda mucho | Normal, Demucs es intensivo. M1/M2/M3 son más rápidos que Intel |
+| La notificación no aparece | Sistema → Notificaciones → Script Editor → activar Alertas |
+| Quiero reprocesar una canción | Ejecuta `stems-limpiar` en Terminal y vuelve a soltar el archivo |
 
 ---
 
@@ -72,9 +76,7 @@ Si prefieres hacerlo tú mismo, descarga los archivos y sigue la `Guia_Stems_Aut
 
 | Archivo | Descripción |
 |---------|-------------|
-| `instalar.sh` | Instalador automático — corre esto primero |
-| `separar_stems.sh` | Script principal (se instala automáticamente) |
-| `Guia_Stems_Automatizacion.docx` | Guía detallada con capturas |
+| `instalar.sh` | Instalador automático — corre este primero |
 
 ---
 
